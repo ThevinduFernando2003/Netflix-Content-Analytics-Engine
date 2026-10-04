@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      ENRICHMENT_ENABLED: "false"
+      INSIGHT_LLM_POLISH: "false"
+      NETFLIX_FAST: "1"
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: pip install -r requirements-dev.txt
+      - name: Ruff
+        run: python -m ruff check src tests scripts app
+      - name: Black
+        run: python -m black --check src tests scripts app
+      - name: Mypy
+        run: python -m mypy src
+      - name: Unit tests with coverage
+        run: python -m pytest tests/unit --cov=src --cov-fail-under=80 --cov-report=xml
+      - name: Integration tests (fixture only)
+        run: python -m pytest tests/integration
+      - name: Docker build (runtime, no training, no network calls)
+        run: docker build -t ncae:ci .
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: coverage.xml

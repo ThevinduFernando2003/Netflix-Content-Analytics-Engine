@@ -1,0 +1,77 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "netflix-analytics-engine"
+version = "0.1.0"
+description = "Catalogue-composition and acquisition-behaviour analytics for the Netflix listing (not audience success)."
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+license = { text = "MIT" }
+authors = [{ name = "Thevindu Fernando" }]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+exclude = '''
+/(
+    \.venv
+  | mlruns
+  | artifacts
+  | registry
+  | data
+  | reports
+)/
+'''
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "scripts", "app", "tests"]
+exclude = ["mlruns", "artifacts", "registry", "data", "notebooks"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N"]
+ignore = ["E501", "B008", "N803", "N806", "N818"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["N802"]
+"scripts/**" = ["T201"]
+
+[tool.mypy]
+python_version = "3.11"
+mypy_path = "."
+packages = ["src"]
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_unused_ignores = false
+warn_redundant_casts = true
+no_implicit_optional = true
+pretty = true
+exclude = ["mlruns", "artifacts", "registry", "tests", "scripts", "app"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = "-q --strict-markers --timeout=180"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::FutureWarning",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["src/api/__init__.py"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+skip_empty = true
