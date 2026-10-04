@@ -1,0 +1,148 @@
+# Feature-store contract. Learned transforms (TF-IDF, scalers) stay inside
+# each model pipeline and are fitted per fold. This file lists engineered
+# columns written once to data/features/features.parquet.
+
+text:
+  columns:
+    - title
+    - listed_in
+    - description
+  tfidf_max_features: 400
+  svd_components: 24
+  ngram_range: [1, 2]
+  min_df: 2
+
+catalogue_prominence:
+  # Constructed index, not an observed outcome. Weights sum to 1.
+  # cast / description terms are zeroed when those columns are absent.
+  formula: "weighted sum of min-max-normalised components"
+  weights:
+    n_genres: 0.28
+    n_countries: 0.22
+    has_director: 0.25
+    n_directors: 0.10
+    n_cast: 0.08
+    description_length: 0.07
+  clip_quantiles:
+    n_genres: [0.0, 0.99]
+    n_countries: [0.0, 0.99]
+    n_directors: [0.0, 0.99]
+    n_cast: [0.0, 0.99]
+    description_length: [0.0, 0.99]
+
+top_n:
+  countries: 15
+  genres: 25
+
+# Per-head allow / ban lists. A test fails if a banned feature reaches the head.
+# Bans are prefix matches unless exact: true.
+leakage:
+  type:
+    banned_prefixes:
+      - duration
+      - duration_minutes
+      - duration_seasons
+    banned_genre_contains:
+      - "TV "
+      - "TV-"
+    banned_genre_exact:
+      - "Kids' TV"
+      - "Docuseries"
+      - "Reality TV"
+      - "Anime Series"
+      - "Teen TV Shows"
+      - "Classic & Cult TV"
+      - "Science & Nature TV"
+      - "Stand-Up Comedy & Talk Shows"
+    reason: "Duration and TV-prefixed genres trivially determine Movie vs TV Show."
+  rating:
+    banned_prefixes: []
+    reason: "No structural ban; a mutual-information audit flags near-perfect separators."
+  acquisition_reg:
+    banned_prefixes:
+      - date_added
+      - year_added
+      - month_added
+      - day_added
+      - weekday_added
+      - quarter_added
+      - added_
+      - years_to_platform
+      - is_likely_original
+      - acquisition_bucket
+    reason: "years_to_platform is year_added - release_year; date_added-derived columns leak the target."
+  acquisition_clf:
+    banned_prefixes:
+      - date_added
+      - year_added
+      - month_added
+      - day_added
+      - weekday_added
+      - quarter_added
+      - added_
+      - years_to_platform
+      - is_likely_original
+      - acquisition_bucket
+    reason: "Same leak as the regression head: the bucket is a function of years_to_platform."
+  cluster:
+    banned_prefixes:
+      - cluster_id
+      - portfolio_fit
+    reason: "Cluster assignment is the output, not an input."
+  forecast:
+    banned_prefixes:
+      - titles_added
+      - y
+    reason: "Only features knowable before period t may be used."
+
+feature_blocks:
+  identity:
+    - show_id
+    - title
+  numeric:
+    - release_year
+    - duration_minutes
+    - duration_seasons
+    - n_genres
+    - n_countries
+    - n_directors
+    - n_cast
+    - description_length
+    - title_length
+    - title_word_count
+    - catalogue_prominence
+    - year_added
+    - month_added
+    - weekday_added
+    - years_to_platform
+  binary:
+    - has_director
+    - has_country
+    - has_cast
+    - has_description
+    - is_movie
+    - is_likely_original
+  categorical:
+    - type
+    - rating
+    - maturity_level
+    - acquisition_bucket
+    - primary_country
+    - primary_genre
+  list:
+    - directors
+    - countries
+    - genres
+    - cast_list
+  text:
+    - title
+    - listed_in
+    - description
+  targets:
+    - type
+    - maturity_level
+    - years_to_platform
+    - acquisition_bucket
+    - is_likely_original
+    - catalogue_prominence
+    - portfolio_fit

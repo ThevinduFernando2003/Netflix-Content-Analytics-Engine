@@ -1,0 +1,90 @@
+# Insight-engine thresholds. With n ≈ 8,790, uncorrected α = 0.05 on
+# dozens of segment × metric tests is a false-discovery machine.
+
+thresholds:
+  fdr_alpha: 0.05
+  min_effect:
+    cohens_d: 0.30
+    cliffs_delta: 0.20
+    cramers_v: 0.10
+    rank_biserial: 0.20
+    slope_r2: 0.20
+    composition_pp: 0.05
+    hhi: 0.10
+  min_support: 30
+  min_trend_points: 6
+  outlier_z: 2.5
+  gap_residual: 8.0
+
+comparisons:
+  numeric_default: mannwhitney
+  # Assumptions checked in src/insights/tests.py: skewness and Shapiro on
+  # a sample; default to Mann-Whitney because catalogue metrics are skewed.
+  trend_min_r2: 0.20
+  association_min_v: 0.10
+
+segments:
+  by:
+    - type
+    - maturity_level
+    - primary_country
+    - primary_genre
+    - acquisition_bucket
+    - cluster_id
+  metrics:
+    - years_to_platform
+    - catalogue_prominence
+    - n_genres
+    - n_countries
+    - is_likely_original
+    - is_movie
+    - description_length
+    - title_length
+
+themes:
+  - acquisition
+  - composition
+  - concentration
+  - maturity
+  - geography
+  - genre
+  - gaps
+
+ranking:
+  # importance = |effect| * log10(n) * novelty_bonus
+  novelty_bonus_unseen_pair: 1.15
+  nested_dedup_jaccard: 0.8
+
+causal_stoplist:
+  - cause
+  - causes
+  - caused
+  - causing
+  - drive
+  - drives
+  - driven
+  - driving
+  - lead to
+  - leads to
+  - led to
+  - leading to
+  - result in
+  - results in
+  - resulted in
+  - resulting in
+  - because of
+  - due to
+  - responsible for
+  - makes
+  - made
+  - impact
+  - impacts
+  - impacted
+  - impacting
+
+llm_polish:
+  enabled: false
+  max_tokens: 120
+
+dedup:
+  collapse_nested: true

@@ -1,0 +1,143 @@
+project:
+  name: netflix-analytics-engine
+  version: "0.1.0"
+  random_seed: 42
+  python: "3.11"
+
+paths:
+  raw_csv: data/raw/netflix_titles.csv
+  interim_dir: data/interim
+  processed_dir: data/processed
+  features_dir: data/features
+  external_dir: data/external
+  artifacts_dir: artifacts
+  reports_dir: reports
+  registry_dir: registry
+  mlruns_dir: mlruns
+
+dataset:
+  # The shipped file is a cleaned listing: 8,790 rows, 10 columns.
+  # It does NOT contain cast or description. Those columns are optional at ingest
+  # and treated as empty when absent (see docs/DATA_ROADMAP.md).
+  expected_columns:
+    - show_id
+    - type
+    - title
+    - director
+    - country
+    - date_added
+    - release_year
+    - rating
+    - duration
+    - listed_in
+  optional_columns:
+    - cast
+    - description
+  allowed_types:
+    - Movie
+    - TV Show
+  release_year_min: 1900
+  release_year_max_offset: 2
+  missing_tokens:
+    - "Not Given"
+    - "N/A"
+    - "n/a"
+    - "NULL"
+    - "null"
+    - "NaN"
+  date_added_formats:
+    - "%m/%d/%Y"
+    - "%-m/%-d/%Y"
+    - "%Y-%m-%d"
+    - "%B %d, %Y"
+    - "%B %d, %Y"
+    - "%b %d, %Y"
+  years_to_platform_floor: -5
+  rating_duration_pattern: "^\\d+\\s*min$"
+
+rating_vocabulary:
+  - G
+  - PG
+  - PG-13
+  - R
+  - NC-17
+  - TV-Y
+  - TV-Y7
+  - TV-Y7-FV
+  - TV-G
+  - TV-PG
+  - TV-14
+  - TV-MA
+  - NR
+  - UR
+
+# Ordinal maturity ladder (Head B / Head D style). NR/UR are dropped as non-ordinal.
+maturity_ladder:
+  Kids:
+    - TV-Y
+    - TV-G
+    - G
+  Older Kids:
+    - TV-Y7
+    - TV-Y7-FV
+    - PG
+    - TV-PG
+  Teens:
+    - PG-13
+    - TV-14
+  Mature:
+    - R
+    - NC-17
+    - TV-MA
+  drop:
+    - NR
+    - UR
+
+# Acquisition-priority buckets (Head D). Boundaries are inclusive on the right
+# except Day-one which is exactly 0-or-below after the floor cap.
+acquisition_buckets:
+  - name: Day-one
+    min: -999
+    max: 0
+  - name: Fast
+    min: 1
+    max: 1
+  - name: Recent
+    min: 2
+    max: 5
+  - name: Back-catalogue
+    min: 6
+    max: 999
+
+validation:
+  max_null_rate:
+    show_id: 0.0
+    type: 0.0
+    title: 0.0
+    release_year: 0.0
+    listed_in: 0.0
+    director: 0.45
+    country: 0.20
+    date_added: 0.02
+    rating: 0.02
+    duration: 0.02
+    cast: 1.0
+    description: 1.0
+  fail_on_duplicate_show_id: true
+  quarantine_unknown_ratings: true
+
+enrichment:
+  enabled: false
+  provider: tmdb
+  cache_dir: data/external/tmdb_cache
+  timeout_seconds: 8
+  max_titles: 0
+
+split:
+  test_size: 0.15
+  stratify_column_by_head:
+    type: type
+    rating: maturity_level
+    acquisition_reg: acquisition_bucket
+    acquisition_clf: acquisition_bucket
+    cluster: type

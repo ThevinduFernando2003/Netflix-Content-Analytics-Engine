@@ -1,0 +1,148 @@
+# Every head shares the feature store and BaseModelTask. Search spaces are
+# deliberately small so a full laptop run stays under ~15 minutes.
+
+defaults:
+  # 30 iterations of four tree ensembles on 8,790 rows with a text SVD block
+  # does not finish inside the 15-minute laptop budget. 8 iterations still
+  # searches the same spaces; see docs/DECISIONS.md.
+  n_iter: 8
+  n_iter_fast: 4
+  cv_folds: 3
+  n_jobs: -1
+  calibration: isotonic
+  calibration_cv: 3
+  shap_background: 80
+  shap_explain: 40
+  shap_enabled: true
+  latency_budget_ms: 250
+  promotion_margin: 0.01
+  calibration_brier_tolerance: 0.25
+
+heads:
+  type:
+    display_name: Content type classification
+    task: binary_classification
+    target: is_movie
+    primary_metric: roc_auc
+    primary_greater_is_better: true
+    leakage_key: type
+    candidates:
+      - dummy
+      - logreg
+      - random_forest
+      - hist_gb
+      - extra_trees
+  rating:
+    display_name: Maturity rating classification
+    task: ordinal_classification
+    target: maturity_level
+    primary_metric: quadratic_weighted_kappa
+    primary_greater_is_better: true
+    leakage_key: rating
+    drop_null_target: true
+    candidates:
+      - dummy
+      - logreg
+      - random_forest
+      - hist_gb
+      - extra_trees
+  acquisition_reg:
+    display_name: Acquisition-priority regression
+    task: regression
+    target: years_to_platform
+    transform: log1p
+    primary_metric: mae
+    primary_greater_is_better: false
+    leakage_key: acquisition_reg
+    candidates:
+      - dummy_median
+      - ridge
+      - random_forest
+      - hist_gb
+      - extra_trees
+  acquisition_clf:
+    display_name: Acquisition-priority classification
+    task: ordinal_classification
+    target: acquisition_bucket
+    primary_metric: quadratic_weighted_kappa
+    primary_greater_is_better: true
+    leakage_key: acquisition_clf
+    candidates:
+      - dummy
+      - logreg
+      - random_forest
+      - hist_gb
+      - extra_trees
+  cluster:
+    display_name: Catalogue segmentation
+    task: clustering
+    target: null
+    primary_metric: silhouette
+    primary_greater_is_better: true
+    leakage_key: cluster
+    k_min: 3
+    k_max: 8
+    bootstrap_resamples: 20
+    bootstrap_frac: 0.8
+    svd_components: 24
+    candidates:
+      - kmeans
+  forecast:
+    display_name: Release-volume forecasting
+    task: forecasting
+    target: titles_added
+    primary_metric: mae
+    primary_greater_is_better: false
+    leakage_key: forecast
+    horizon: 6
+    min_train_months: 24
+    cutoff: "2019-12-01"
+    seasonal_period: 12
+    candidates:
+      - seasonal_naive
+      - holt_winters
+      - ridge_lags
+      - hist_gb_lags
+
+search_spaces:
+  logreg:
+    C: [0.1, 0.3, 1.0, 3.0, 10.0]
+    penalty: ["l2"]
+  ridge:
+    alpha: [0.1, 0.3, 1.0, 3.0, 10.0, 30.0]
+  random_forest:
+    n_estimators: [80, 120]
+    max_depth: [6, 10, 14, null]
+    min_samples_leaf: [2, 5, 10]
+    max_features: ["sqrt", 0.5]
+  extra_trees:
+    n_estimators: [80, 120]
+    max_depth: [6, 10, 14, null]
+    min_samples_leaf: [2, 5, 10]
+    max_features: ["sqrt", 0.5]
+  hist_gb:
+    max_depth: [3, 5, 7]
+    learning_rate: [0.05, 0.1, 0.2]
+    max_iter: [80, 120]
+    min_samples_leaf: [10, 20]
+  dummy: {}
+  dummy_median: {}
+  kmeans: {}
+  seasonal_naive: {}
+  holt_winters:
+    trend: ["add", null]
+    seasonal: ["add"]
+  ridge_lags:
+    alpha: [0.3, 1.0, 3.0]
+  hist_gb_lags:
+    max_depth: [3, 5]
+    learning_rate: [0.05, 0.1]
+    max_iter: [80]
+
+quality_gates:
+  require_beat_baseline: true
+  require_beat_incumbent: true
+  require_no_banned_features: true
+  require_calibration: true
+  require_latency: true
+  segment_regression_tolerance: 0.08
