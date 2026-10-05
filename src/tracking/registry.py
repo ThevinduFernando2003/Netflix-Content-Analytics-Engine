@@ -34,6 +34,13 @@ def read_incumbent(cfg: AppConfig, head: str) -> dict[str, Any] | None:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _repo_relative(cfg: AppConfig, path: Path) -> str:
+    try:
+        return path.resolve().relative_to(cfg.root.resolve()).as_posix()
+    except ValueError:
+        return str(path)
+
+
 def write_promotion(
     cfg: AppConfig, head: str, record: dict[str, Any], model_src: Path | None
 ) -> Path:
@@ -44,7 +51,7 @@ def write_promotion(
         target = dest / model_src.name
         if model_src.resolve() != target.resolve():
             shutil.copy2(model_src, target)
-        record = {**record, "model_path": str(target)}
+        record = {**record, "model_path": _repo_relative(cfg, target)}
         (dest / "record.json").write_text(
             json.dumps(record, indent=2, default=str), encoding="utf-8"
         )
@@ -54,7 +61,7 @@ def write_promotion(
         "candidate": record.get("candidate"),
         "metrics": record.get("metrics"),
         "promoted_at": utc_now(),
-        "dir": str(dest),
+        "dir": _repo_relative(cfg, dest),
         "previous": read_incumbent(cfg, head),
     }
     current_pointer(cfg, head).write_text(

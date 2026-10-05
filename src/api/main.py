@@ -15,7 +15,14 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 
 from src import __version__
 from src.api.deps import get_state, load_state
-from src.api.predict import predict_acquisition, predict_rating, predict_segment, predict_type
+from src.api.predict import (
+    predict_acquisition,
+    predict_rating,
+    predict_segment,
+    predict_type,
+    prominence_value,
+    title_to_frame,
+)
 from src.api.schemas import AnalyzeOut, HealthOut, MetaOut, TitleIn
 from src.config import load_config
 from src.logging_conf import configure_logging, get_logger
@@ -171,6 +178,7 @@ def create_app() -> FastAPI:
                 "proxy_note": PROXY_NOTES["acquisition_priority"],
             }
         seg = predict_segment(state, payload)
+        prominence = prominence_value(title_to_frame(payload, state.cfg))
         insights = (state.insights.get("findings") or [])[:3]
         summary = (
             f"{payload.title} is analysed as catalogue metadata only. "
@@ -184,7 +192,7 @@ def create_app() -> FastAPI:
             acquisition_priority=acq,  # type: ignore[arg-type]
             segment=seg,  # type: ignore[arg-type]
             catalogue_prominence={
-                "value": None,
+                "value": prominence,
                 "is_proxy": True,
                 "proxy_note": PROXY_NOTES["catalogue_prominence"],
             },

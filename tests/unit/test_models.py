@@ -56,6 +56,18 @@ def test_unseen_categorical_does_not_crash(featured, cfg):
     assert pred.shape[0] == 1
 
 
+def test_type_serving_text_is_title_only(featured, cfg):
+    recs = _train_one(featured, cfg, "type")
+    blob = __import__("joblib").load(recs[-1]["model_path"])
+    row = featured.iloc[[0]].copy()
+    row["listed_in"] = "TV Dramas, TV Mysteries"
+    from src.api.predict import _align
+
+    aligned = _align(row, blob)
+    assert aligned["text_blob"].iloc[0] == str(row["title"].iloc[0])
+    assert "TV Dramas" not in aligned["text_blob"].iloc[0]
+
+
 def test_single_row_predict(featured, cfg):
     recs = _train_one(featured, cfg, "rating")
     blob = __import__("joblib").load(recs[-1]["model_path"])

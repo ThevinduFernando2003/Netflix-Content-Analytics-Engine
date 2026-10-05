@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
 import pandas as pd
 from fastapi import HTTPException
 
@@ -11,6 +12,7 @@ from src.api.deps import AppState
 from src.api.schemas import TitleIn
 from src.features.engineer import engineer_features
 from src.features.store import assert_schema_hash
+from src.models.clustering import transform_with_bundle
 from src.targets.definitions import PROXY_NOTES
 
 
@@ -133,28 +135,76 @@ def predict_acquisition(state: AppState, payload: TitleIn) -> dict[str, Any]:
 def predict_segment(state: AppState, payload: TitleIn) -> dict[str, Any]:
     profiles = (state.cluster or {}).get("profiles") or []
     frame = title_to_frame(payload, state.cfg)
-    # Nearest-centroid in a cheap metadata space when the kmeans artifact is present.
-    cluster_id = 0
-    distance = 0.0
-    name = profiles[0]["name"] if profiles else "unassigned"
-    if state.store is not None and "cluster_id" in state.store.columns:
-        # Match on primary genre when possible.
-        genre = str(frame.iloc[0].get("primary_genre") or "")
-        subset = state.store[state.store["primary_genre"].astype(str) == genre]
-        if len(subset) and subset["cluster_id"].notna().any():
-            cluster_id = int(subset["cluster_id"].mode().iloc[0])
-            prof = next((p for p in profiles if int(p["cluster_id"]) == cluster_id), None)
-            name = prof["name"] if prof else name
-    fit = float(frame.iloc[0].get("catalogue_prominence") or 0.5)
+    artifact = state.models.get("cluster")
+    scored = _score_cluster(frame, artifact)
+    cluster_id: int | None
+    distance: float | None
+    fit: float | None
+    name: str
+    outlier: bool
+    if scored is not None:
+        cluster_id = int(scored["cluster_id"])
+        distance = float(scored["distance"])
+        fit = float(scored["portfolio_fit"])
+        prof = next((p for p in profiles if int(p["cluster_id"]) == cluster_id), None)
+        name = prof["name"] if prof else f"cluster_{cluster_id}"
+        outlier = fit < 0.05
+    else:
+        cluster_id, name = _genre_mode_cluster(state, frame, profiles)
+        distance = None
+        fit = None
+        outlier = False
     return {
         "cluster_id": cluster_id,
         "name": name,
         "distance": distance,
-        "outlier": False,
+        "outlier": outlier,
         "portfolio_fit": fit,
         "is_proxy": True,
         "proxy_note": PROXY_NOTES["portfolio_fit"],
     }
+
+
+def prominence_value(frame: pd.DataFrame) -> float | None:
+    if "catalogue_prominence" not in frame.columns:
+        return None
+    value = frame.iloc[0]["catalogue_prominence"]
+    if value is None or (isinstance(value, float) and np.isnan(value)) or pd.isna(value):
+        return None
+    return float(value)
+
+
+def _score_cluster(frame: pd.DataFrame, artifact: Any) -> dict[str, float | int] | None:
+    if not isinstance(artifact, dict) or "bundle" not in artifact or "model" not in artifact:
+        return None
+    embedded = transform_with_bundle(frame, artifact["bundle"])
+    model = artifact["model"]
+    label = int(model.predict(embedded)[0])
+    center = model.cluster_centers_[label]
+    distance = float(np.linalg.norm(embedded[0] - center))
+    dmin = float(artifact.get("distance_min", 0.0))
+    dmax = float(artifact.get("distance_max", 1.0))
+    span = (dmax - dmin) or 1.0
+    fit = float(np.clip(1.0 - (distance - dmin) / span, 0.0, 1.0))
+    return {"cluster_id": label, "distance": distance, "portfolio_fit": fit}
+
+
+def _genre_mode_cluster(
+    state: AppState, frame: pd.DataFrame, profiles: list[dict[str, Any]]
+) -> tuple[int | None, str]:
+    """Fallback when the fitted vectorizer was not saved with the cluster model."""
+    name = "unassigned"
+    if state.store is None or "cluster_id" not in state.store.columns:
+        return None, name
+    genre = str(frame.iloc[0].get("primary_genre") or "")
+    if not genre:
+        return None, name
+    subset = state.store[state.store["primary_genre"].astype(str) == genre]
+    if not len(subset) or not subset["cluster_id"].notna().any():
+        return None, name
+    cluster_id = int(subset["cluster_id"].mode().iloc[0])
+    prof = next((p for p in profiles if int(p["cluster_id"]) == cluster_id), None)
+    return cluster_id, prof["name"] if prof else name
 
 
 def _align(frame: pd.DataFrame, model: Any) -> pd.DataFrame:
@@ -172,12 +222,16 @@ def _align(frame: pd.DataFrame, model: Any) -> pd.DataFrame:
                 if "title" in frame.columns
                 else pd.Series("", index=frame.index)
             )
-            listed = (
-                frame["listed_in"].astype(str)
-                if "listed_in" in frame.columns
-                else pd.Series("", index=frame.index)
-            )
-            out[text_col] = (title + " " + listed).astype(str)
+            # Head A is trained on title only. Genre strings still separate type.
+            if model.get("head") == "type":
+                out[text_col] = title
+            else:
+                listed = (
+                    frame["listed_in"].astype(str)
+                    if "listed_in" in frame.columns
+                    else pd.Series("", index=frame.index)
+                )
+                out[text_col] = (title + " " + listed).astype(str)
     for c in numeric:
         if c not in out.columns:
             out[c] = 0

@@ -51,8 +51,7 @@ dashboard:
 	$(PYTHON) -m streamlit run app/streamlit_app.py --server.port $${STREAMLIT_SERVER_PORT:-8501}
 
 run:
-	$(PYTHON) -m uvicorn src.api.main:app --host 0.0.0.0 --port $${PORT:-8000} &
-	$(PYTHON) -m streamlit run app/streamlit_app.py --server.port 8501
+	$(PYTHON) -c "import subprocess,sys; api=subprocess.Popen([sys.executable,'-m','uvicorn','src.api.main:app','--host','0.0.0.0','--port','8000']); dash=subprocess.Popen([sys.executable,'-m','streamlit','run','app/streamlit_app.py','--server.port','8501']); dash.wait(); api.terminate()"
 
 mlflow-ui:
 	$(PYTHON) -m mlflow ui --backend-store-uri ./mlruns --port 5000

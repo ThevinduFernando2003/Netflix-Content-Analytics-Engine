@@ -10,7 +10,9 @@ Non-obvious choices, one line of reasoning each.
 - `"Not Given"` treated as missing (empty string + indicator), never as a real director/country: it is a cleaned-file sentinel, not a name.
 - `catalogue_prominence` keeps the spec weights and zeros the missing `n_cast` / `description_length` terms rather than silently renormalising: the index is weaker, and renormalising would hide that.
 - Acquisition heads ban every `date_added`-derived column including `year_added`: `years_to_platform = year_added - release_year`, so leaving `year_added` in hands the model half the target.
-- Head A bans duration, TV-prefixed genre tokens, and `listed_in` itself: after the TV-token ban the remaining genre strings ("Movies", "Documentaries", empty) still separate type at ROC-AUC ≈ 1.00, so the head uses title text only.
+- Head A bans duration, TV-prefixed genre tokens, and `listed_in` itself: after the TV-token ban the remaining genre strings ("Movies", "Documentaries", empty) still separate type at ROC-AUC ≈ 1.00, so the head uses title text only. Serving builds that same title-only blob; concatenating `listed_in` at request time would put the banned signal back in.
+- Cluster scoring keeps the fitted TF-IDF/SVD projector with the k-means model. A new title is embedded in that space; genre-mode assignment is only a fallback and does not invent a distance of zero.
+- Promotion records store registry paths relative to the repo root so a container on another machine can still open the incumbent.
 - Model `log1p(years_to_platform - floor)` and invert for metrics: the lag is right-skewed; MAPE is not reported because true values are frequently zero.
 - Clustering uses L2-normalised TruncatedSVD + K-Means (spherical) and chooses *k* by silhouette **and** bootstrap ARI: Euclidean k-means on raw TF-IDF and elbow-only *k* are both misleading.
 - Head F always reports a seasonal-naive baseline and prediction intervals: ~100 monthly points with a 2020 break cannot support a confident long-horizon point forecast.

@@ -17,11 +17,18 @@ from src.logging_conf import get_logger
 log = get_logger(__name__)
 
 
-def _design_matrix(frame: pd.DataFrame, cfg: AppConfig) -> np.ndarray:
+_EXTRA_COLUMNS = ("n_genres", "n_countries", "has_director", "release_year", "is_movie")
+
+
+def _texts(frame: pd.DataFrame) -> list[str]:
     text_cols = [
         c for c in ("title", "listed_in", "primary_country", "primary_genre") if c in frame.columns
     ]
-    texts = frame[text_cols].astype(str).agg(" ".join, axis=1).tolist()
+    return frame[text_cols].astype(str).agg(" ".join, axis=1).tolist()
+
+
+def _design_matrix(frame: pd.DataFrame, cfg: AppConfig) -> tuple[np.ndarray, dict[str, Any]]:
+    texts = _texts(frame)
     n_comp = int(cfg.models["heads"]["cluster"].get("svd_components", 24))
     pipe = text_svd_pipeline(
         max_features=int(cfg.features["text"]["tfidf_max_features"]),
@@ -31,19 +38,44 @@ def _design_matrix(frame: pd.DataFrame, cfg: AppConfig) -> np.ndarray:
         random_state=cfg.seed,
     )
     reduced = pipe.fit_transform(texts)
-    extras = []
-    for col in ("n_genres", "n_countries", "has_director", "release_year", "is_movie"):
-        if col in frame.columns:
-            extras.append(
-                pd.to_numeric(frame[col], errors="coerce").fillna(0).to_numpy().reshape(-1, 1)
-            )
-    if extras:
-        extra = np.hstack(extras)
-        extra = extra - extra.mean(axis=0)
+    extra_names = [col for col in _EXTRA_COLUMNS if col in frame.columns]
+    mean = np.zeros(len(extra_names))
+    scale = np.ones(len(extra_names))
+    if extra_names:
+        extra = _extra_block(frame, extra_names)
+        mean = extra.mean(axis=0)
         scale = extra.std(axis=0)
         scale[scale == 0] = 1.0
-        extra = extra / scale
-        reduced = np.hstack([reduced, extra])
+        reduced = np.hstack([reduced, (extra - mean) / scale])
+    bundle = {
+        "text_pipe": pipe,
+        "extra_names": extra_names,
+        "extra_mean": mean,
+        "extra_scale": scale,
+    }
+    return normalize(reduced), bundle
+
+
+def _extra_block(frame: pd.DataFrame, names: list[str]) -> np.ndarray:
+    cols = []
+    for name in names:
+        if name in frame.columns:
+            values = pd.to_numeric(frame[name], errors="coerce").fillna(0).to_numpy()
+        else:
+            values = np.zeros(len(frame))
+        cols.append(values.reshape(-1, 1))
+    return np.hstack(cols)
+
+
+def transform_with_bundle(frame: pd.DataFrame, bundle: dict[str, Any]) -> np.ndarray:
+    """Project new rows with the vectorizer fitted at training time."""
+    reduced = bundle["text_pipe"].transform(_texts(frame))
+    names = list(bundle.get("extra_names") or [])
+    if names:
+        extra = _extra_block(frame, names)
+        mean = np.asarray(bundle["extra_mean"])
+        scale = np.asarray(bundle["extra_scale"])
+        reduced = np.hstack([reduced, (extra - mean) / scale])
     return normalize(reduced)
 
 
@@ -53,13 +85,15 @@ def bootstrap_ari(
     n_resamples: int,
     frac: float,
     seed: int,
+    full_labels: np.ndarray | None = None,
 ) -> float:
     rng = np.random.default_rng(seed)
     n = X.shape[0]
-    take = max(10, int(frac * n))
+    take = min(n, max(k + 1, int(frac * n)))
     scores: list[float] = []
-    full = KMeans(n_clusters=k, n_init=10, random_state=seed)
-    full_labels = full.fit_predict(X)
+    if full_labels is None:
+        full = KMeans(n_clusters=k, n_init=10, random_state=seed)
+        full_labels = full.fit_predict(X)
     for i in range(n_resamples):
         idx = rng.choice(n, size=take, replace=False)
         km = KMeans(n_clusters=k, n_init=10, random_state=seed + i)
@@ -79,7 +113,7 @@ def choose_k(X: np.ndarray, cfg: AppConfig) -> dict[str, Any]:
         km = KMeans(n_clusters=k, n_init=10, random_state=cfg.seed)
         labels = km.fit_predict(X)
         sil = float(silhouette_score(X, labels)) if len(set(labels)) > 1 else -1.0
-        ari = bootstrap_ari(X, k, n_boot, frac, cfg.seed)
+        ari = bootstrap_ari(X, k, n_boot, frac, cfg.seed, full_labels=labels)
         rows.append({"k": k, "silhouette": sil, "bootstrap_ari": ari, "score": sil + ari})
         log.info("cluster_k_eval", k=k, silhouette=sil, bootstrap_ari=ari)
     best = max(rows, key=lambda r: r["score"])
@@ -87,7 +121,7 @@ def choose_k(X: np.ndarray, cfg: AppConfig) -> dict[str, Any]:
 
 
 def fit_clusters(frame: pd.DataFrame, cfg: AppConfig) -> dict[str, Any]:
-    X = _design_matrix(frame, cfg)
+    X, bundle = _design_matrix(frame, cfg)
     choice = choose_k(X, cfg)
     k = int(choice["chosen_k"])
     model = KMeans(n_clusters=k, n_init=10, random_state=cfg.seed)
@@ -106,6 +140,7 @@ def fit_clusters(frame: pd.DataFrame, cfg: AppConfig) -> dict[str, Any]:
         "choice": choice,
         "profiles": profiles,
         "X": X,
+        "bundle": bundle,
         "model": model,
         "silhouette": float(silhouette_score(X, labels)) if len(set(labels)) > 1 else -1.0,
     }

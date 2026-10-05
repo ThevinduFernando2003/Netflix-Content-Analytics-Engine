@@ -411,7 +411,15 @@ def train_cluster_head(
     art = cfg.path("artifacts_dir") / "models" / "cluster"
     art.mkdir(parents=True, exist_ok=True)
     (art / "cluster.json").write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
-    joblib.dump(result["model"], art / "kmeans.joblib")
+    joblib.dump(
+        {
+            "model": result["model"],
+            "bundle": result["bundle"],
+            "distance_min": float(result["distances"].min()),
+            "distance_max": float(result["distances"].max()),
+        },
+        art / "kmeans.joblib",
+    )
     record = {
         "head": "cluster",
         "candidate": "kmeans",

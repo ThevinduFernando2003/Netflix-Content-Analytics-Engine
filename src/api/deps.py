@@ -33,6 +33,20 @@ class AppState:
 STATE = AppState(cfg=load_config())
 
 
+def _resolve(cfg: AppConfig, raw: str | None) -> Path | None:
+    """Find a model path that was saved on this machine or copied into the registry."""
+    if not raw:
+        return None
+    path = Path(raw)
+    if path.exists():
+        return path
+    rooted = cfg.root / raw
+    if rooted.exists():
+        return rooted
+    hits = list(cfg.path("registry_dir").rglob(path.name))
+    return hits[0] if hits else None
+
+
 def _load_json(path: Path) -> dict[str, Any]:
     if path.exists():
         return json.loads(path.read_text(encoding="utf-8"))
@@ -66,13 +80,17 @@ def load_state(cfg: AppConfig | None = None) -> AppState:
     for head in cfg.models["heads"]:
         inc = read_incumbent(cfg, head)
         if inc and inc.get("dir"):
-            rec_path = Path(inc["dir"]) / "record.json"
+            inc_dir = _resolve(cfg, str(inc["dir"]))
+            rec_path = (inc_dir / "record.json") if inc_dir else Path(inc["dir"]) / "record.json"
             if rec_path.exists():
                 rec = json.loads(rec_path.read_text(encoding="utf-8"))
-                mp = rec.get("model_path")
-                if mp and Path(mp).exists():
+                model_file = _resolve(cfg, rec.get("model_path"))
+                if model_file is None and inc_dir:
+                    bundled = sorted(inc_dir.glob("*.joblib"))
+                    model_file = bundled[-1] if bundled else None
+                if model_file is not None:
                     try:
-                        state.models[head] = joblib.load(mp)
+                        state.models[head] = joblib.load(model_file)
                     except Exception:
                         pass
     state.ready = state.store is not None
