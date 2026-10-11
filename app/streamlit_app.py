@@ -58,6 +58,23 @@ st.markdown(
         color: #141414 !important;
     }
     input, textarea { color: #141414 !important; background: #ffffff !important; }
+    header[data-testid="stHeader"] { background: #141414; height: 0; }
+    [data-testid="stToolbar"] { display: none; }
+    section.main > div.block-container { padding-top: 4.6rem; }
+    .topbar {
+        position: fixed; top: 0; left: 0; right: 0; z-index: 1000000;
+        display: flex; align-items: center; justify-content: space-between; gap: 1.25rem;
+        background: #141414; padding: 0.75rem 1.4rem;
+    }
+    .topbar, .topbar * { color: #f5f5f5 !important; }
+    .topbar .brand {
+        font-size: 1.2rem; font-weight: 700; white-space: nowrap; letter-spacing: -0.02em;
+    }
+    .topbar nav { display: flex; flex-wrap: nowrap; gap: 0.25rem; overflow-x: auto; }
+    .topbar a {
+        text-decoration: none; white-space: nowrap; padding: 0.4rem 0.75rem; border-radius: 8px;
+    }
+    .topbar a.on { background: #e50914; color: #ffffff !important; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -200,15 +217,17 @@ def banner() -> None:
 
 
 def navigate() -> str:
-    if "nav_radio" not in st.session_state:
-        st.session_state.nav_radio = "Overview"
-    return st.radio(
-        "Go to",
-        PAGES,
-        horizontal=True,
-        key="nav_radio",
-        label_visibility="collapsed",
+    raw = st.query_params.get("page", "Overview")
+    current = raw if isinstance(raw, str) and raw in PAGES else "Overview"
+    links = "".join(
+        f'<a class="{"on" if name == current else ""}" href="?page={name}">{name}</a>'
+        for name in PAGES
     )
+    st.markdown(
+        f'<div class="topbar"><span class="brand">Netflix Catalogue</span><nav>{links}</nav></div>',
+        unsafe_allow_html=True,
+    )
+    return current
 
 
 def _readable_chart(chart: alt.Chart) -> alt.Chart:
@@ -496,7 +515,11 @@ def page_models() -> None:
         st.markdown(sentence)
         shown: set[tuple[str, bool, bool]] = set()
         for rec in rows:
-            key = (str(rec.get("candidate")), bool(rec.get("is_baseline")), bool(rec.get("promoted")))
+            key = (
+                str(rec.get("candidate")),
+                bool(rec.get("is_baseline")),
+                bool(rec.get("promoted")),
+            )
             if key in shown:
                 continue
             shown.add(key)
