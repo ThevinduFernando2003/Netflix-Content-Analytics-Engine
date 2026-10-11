@@ -113,9 +113,14 @@ def create_app() -> FastAPI:
     def models() -> list[dict[str, Any]]:
         state = get_state()
         records = load_run_records(state.cfg)
+        incumbents = {
+            head: read_incumbent(state.cfg, head)
+            for head in {rec.get("head") for rec in records}
+            if head
+        }
         out = []
         for rec in records:
-            inc = read_incumbent(state.cfg, rec["head"])
+            inc = incumbents.get(rec.get("head"))
             out.append(
                 {
                     **{
