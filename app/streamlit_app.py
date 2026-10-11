@@ -274,14 +274,15 @@ def page_overview() -> None:
         fail(error)
         return
     lag = overview.get("median_acquisition_lag")
-    lag_txt = f"{lag:.1f}y" if isinstance(lag, int | float) else "—"
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric("Titles", f"{overview['n_titles']:,}")
-    c2.metric("Movies", f"{overview['n_movies']:,}")
-    c3.metric("TV shows", f"{overview['n_tv']:,}")
-    c4.metric("Countries", f"{overview['n_countries']:,}")
-    c5.metric("Median lag (proxy)", lag_txt)
-    c6.metric("Added in last 3y", f"{overview.get('share_added_last_3y', 0):.0%}")
+    lag_txt = f"{lag:.1f} years" if isinstance(lag, int | float) else "—"
+    top = st.columns(3)
+    top[0].metric("Titles", f"{overview['n_titles']:,}")
+    top[1].metric("Movies", f"{overview['n_movies']:,}")
+    top[2].metric("TV shows", f"{overview['n_tv']:,}")
+    bottom = st.columns(3)
+    bottom[0].metric("Countries", f"{overview['n_countries']:,}")
+    bottom[1].metric("Typical wait after release", lag_txt)
+    bottom[2].metric("Added in the last 3 years", f"{overview.get('share_added_last_3y', 0):.0%}")
 
     series, _ = api_get("/stats/timeseries", "metric=titles_added")
     if isinstance(series, dict) and series.get("points"):
@@ -421,57 +422,116 @@ def page_analyzer() -> None:
     segment = data.get("segment") or {}
     kind = data.get("type") or {}
     rated = data.get("rating") or {}
-    a, b, c, d = st.columns(4)
-    a.metric("Type", kind.get("label") or "—")
-    b.metric("Maturity band", rated.get("label") or "—")
-    c.metric("Lag (proxy, years)", _fmt(acquired.get("years_to_platform")))
-    d.metric("Bucket", acquired.get("bucket") or "—")
-    st.caption(
-        f"Interval {_fmt(acquired.get('interval_lo'))} to {_fmt(acquired.get('interval_hi'))} years. "
-        f"Segment: {segment.get('name') or 'unassigned'}. "
-        f"is_proxy={acquired.get('is_proxy')}."
+    left = st.columns(2)
+    left[0].metric("Movie or TV show", kind.get("label") or "—")
+    left[1].metric("Age-rating band", rated.get("label") or "—")
+    right = st.columns(2)
+    right[0].metric("Years until Netflix added it", _fmt(acquired.get("years_to_platform")))
+    right[1].metric("How fast it was added", acquired.get("bucket") or "—")
+    st.markdown(
+        f"A typical range for that wait is {_fmt(acquired.get('interval_lo'))} to "
+        f"{_fmt(acquired.get('interval_hi'))} years. "
+        f"The closest catalogue group is {segment.get('name') or 'not assigned'}. "
+        "The wait is a timing proxy. It is not a popularity score."
     )
     with st.expander("Full response"):
         st.json(data)
 
 
+HEAD_HELP = {
+    "type": (
+        "Movie or TV show",
+        "Reads the title and the other listing fields and guesses whether the row is a movie or a TV show.",
+        "roc_auc",
+        "Share of pairs it ranks correctly. 0.50 is a coin flip. 1.00 is perfect.",
+    ),
+    "rating": (
+        "Age-rating band",
+        "Guesses the maturity band, such as kids, teen, or mature, from the listing.",
+        "quadratic_weighted_kappa",
+        "How close the guess is to the real band. 1.00 is an exact match. 0 is no better than chance.",
+    ),
+    "acquisition_reg": (
+        "Years until added",
+        "Guesses how many years passed between the release year and the year Netflix added the title.",
+        "mae",
+        "Average miss, in years. Lower is closer.",
+    ),
+    "acquisition_clf": (
+        "Speed bucket",
+        "Puts that wait into a bucket: day-one, fast, recent, or back catalogue.",
+        "quadratic_weighted_kappa",
+        "How close the bucket is to the real one. 1.00 is exact.",
+    ),
+    "cluster": (
+        "Similar listings",
+        "Groups titles that look alike in the catalogue. The group is a neighbourhood, not a quality mark.",
+        "silhouette",
+        "How cleanly the groups separate. Higher means tighter groups.",
+    ),
+    "forecast": (
+        "Titles added per month",
+        "Guesses how many titles arrive in a future month. On this file the simple seasonal guess won.",
+        "mae",
+        "Average miss, in titles per month. Lower is closer.",
+    ),
+}
+
+
 def page_models() -> None:
-    st.title("Model scoreboard")
+    st.title("What the models are")
+    st.markdown(
+        "A model here is a repeatable guess about a field that is already in the listing. "
+        "The scoreboard compares each guess with a simple baseline, such as always picking "
+        "the most common answer. **Served** means that guess was good enough to use in the app. "
+        "None of these scores are views, ratings from audiences, or revenue."
+    )
     models, error = api_get("/models")
     if error or not isinstance(models, list):
         fail(error)
         return
-    rows = []
-    for rec in models:
-        metrics = rec.get("metrics") or {}
-        primary = next(iter(metrics.values()), None) if metrics else None
-        rows.append(
-            {
-                "Head": rec.get("head"),
-                "Candidate": rec.get("candidate"),
-                "Baseline": rec.get("is_baseline"),
-                "Promoted": rec.get("promoted"),
-                "First metric": primary,
-            }
-        )
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True, height=420)
+    for head, (title, sentence, metric_key, metric_help) in HEAD_HELP.items():
+        rows = [rec for rec in models if rec.get("head") == head]
+        if not rows:
+            continue
+        st.subheader(title)
+        st.markdown(sentence)
+        shown: set[tuple[str, bool, bool]] = set()
+        for rec in rows:
+            key = (str(rec.get("candidate")), bool(rec.get("is_baseline")), bool(rec.get("promoted")))
+            if key in shown:
+                continue
+            shown.add(key)
+            metrics = rec.get("metrics") or {}
+            score = metrics.get(metric_key)
+            role = "Served in the app" if rec.get("promoted") else "Tried, not served"
+            if rec.get("is_baseline"):
+                role = "Simple baseline"
+            st.markdown(
+                f"**{rec.get('candidate')}** — {role}. "
+                f"Score {_fmt(score) if score is not None else 'not recorded'}. {metric_help}"
+            )
     drift, _ = api_get("/drift")
     perf = (drift or {}).get("performance_drift") if isinstance(drift, dict) else None
     if isinstance(perf, dict):
-        st.subheader("Later years vs a random split")
+        st.subheader("Do the guesses still work on later years?")
+        st.markdown(
+            "One check trains on a random mix of years. The other trains on earlier years "
+            "and scores later years. A bigger miss on later years means the pattern shifted."
+        )
         left, right = st.columns(2)
         type_row = perf.get("type") or {}
         lag_row = perf.get("acquisition_reg") or {}
         left.metric(
-            "Type ROC-AUC drop",
+            "Movie-or-TV score change",
             _fmt(type_row.get("degradation")),
-            delta=f"{_fmt(type_row.get('random_split'))} → {_fmt(type_row.get('temporal'))}",
+            delta=f"{_fmt(type_row.get('random_split'))} to {_fmt(type_row.get('temporal'))}",
             delta_color="off",
         )
         right.metric(
-            "Acquisition MAE increase (years)",
+            "Wait-time miss, extra years",
             _fmt(lag_row.get("degradation")),
-            delta=f"{_fmt(lag_row.get('random_split'))} → {_fmt(lag_row.get('temporal'))}",
+            delta=f"{_fmt(lag_row.get('random_split'))} to {_fmt(lag_row.get('temporal'))}",
             delta_color="off",
         )
 
@@ -480,18 +540,31 @@ def page_about() -> None:
     st.title("What this can and cannot say")
     banner()
     st.markdown(
-        """
-**Success is not measurable from this file.** There is no view count, watch time,
-completion, revenue, subscriber impact, review score, award, budget, or renewal flag.
-
-| Proxy | What it actually is |
-|---|---|
-| Acquisition lag | Year added minus release year. Platform timing, not demand. |
-| Likely original | Added in or before the release year. A heuristic, with false positives. |
-| Catalogue prominence | A weighted metadata-richness index. Not an editorial outcome. |
-| Portfolio fit | Distance to a cluster centroid. Not quality. |
-"""
+        "**This file cannot tell you what succeeded.** It has no view count, watch time, "
+        "completion, revenue, subscriber impact, review score, award, budget, or renewal flag. "
+        "Every score below is a stand-in built from the listing itself."
     )
+    notes = [
+        (
+            "Years until added",
+            "The year Netflix added the title, minus the release year. It says when the title arrived, not whether people wanted it.",
+        ),
+        (
+            "Looks like an original",
+            "The title was added in the release year or earlier. That is a rough rule and it is sometimes wrong.",
+        ),
+        (
+            "How much detail the listing has",
+            "A weighted count of filled-in fields, such as director and country. A fuller listing is not a better show.",
+        ),
+        (
+            "How close it sits to similar titles",
+            "Distance from a group of lookalike listings. Close means similar metadata, not higher quality.",
+        ),
+    ]
+    for title, body in notes:
+        st.markdown(f"**{title}**")
+        st.markdown(body)
 
 
 def _fmt(value: object) -> str:
