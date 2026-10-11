@@ -200,17 +200,15 @@ def banner() -> None:
 
 
 def navigate() -> str:
-    if "page" not in st.session_state:
-        st.session_state.page = "Overview"
-    choice = st.radio(
+    if "nav_radio" not in st.session_state:
+        st.session_state.nav_radio = "Overview"
+    return st.radio(
         "Go to",
         PAGES,
-        index=PAGES.index(st.session_state.page),
         horizontal=True,
         key="nav_radio",
+        label_visibility="collapsed",
     )
-    st.session_state.page = choice
-    return choice
 
 
 def _readable_chart(chart: alt.Chart) -> alt.Chart:
