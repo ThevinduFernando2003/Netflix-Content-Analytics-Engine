@@ -87,6 +87,106 @@ def api_post(path: str, payload: dict) -> tuple[dict | None, str | None]:
         return None, str(exc)
 
 
+PLAIN = {
+    "title_length": "title length, counted in characters",
+    "years_to_platform": "years from the release year until Netflix added it",
+    "catalogue_prominence": "how much detail the listing includes",
+    "is_likely_original": "whether it was added in the release year or earlier",
+    "is_movie": "whether it is a movie",
+    "n_genres": "how many genres are listed",
+    "n_countries": "how many countries are listed",
+    "n_directors": "how many directors are listed",
+    "primary_country": "country",
+    "primary_genre": "genre",
+    "type": "movie or TV show",
+    "maturity_level": "age-rating band",
+    "acquisition_bucket": "how quickly it was added",
+    "country": "country",
+    "genre": "genre",
+}
+
+THEME_LABELS = {
+    "composition": "What is listed",
+    "genre": "By genre",
+    "geography": "By country",
+    "concentration": "How uneven",
+    "acquisition": "How fast titles were added",
+    "gaps": "Missing combinations",
+}
+
+
+def _num(value: object, digits: int = 1) -> str:
+    if isinstance(value, int | float):
+        return f"{float(value):.{digits}f}"
+    return "—"
+
+
+def _gap(effect: object) -> str:
+    try:
+        size = abs(float(effect))
+    except (TypeError, ValueError):
+        return "a real difference"
+    if size >= 0.43:
+        return "a large difference"
+    if size >= 0.28:
+        return "a clear difference"
+    return "a modest difference"
+
+
+def plain_finding(item: dict) -> str:
+    """One sentence a non-specialist can read. Numbers stay; field names do not."""
+    kind = item.get("kind")
+    values = item.get("values") or {}
+    n = item.get("n")
+    n_txt = f"{int(n):,}" if isinstance(n, int | float) else "the titles in this comparison"
+    effect = item.get("effect")
+    if kind == "segment_difference":
+        what = PLAIN.get(str(values.get("metric")), "this measure")
+        left = values.get("segment_a") or "one group"
+        right = values.get("segment_b") or "another group"
+        direction = values.get("direction") or "different"
+        return (
+            f"{left} and {right} are not the same on {what}. "
+            f"{left} is {direction}: about {_num(values.get('mean_a'))}, "
+            f"against about {_num(values.get('mean_b'))} for {right}. "
+            f"That is {_gap(effect)}. The score is {_num(effect, 2)} on a scale from 0 "
+            f"(no difference) to 1 (the groups do not overlap). "
+            f"This uses {n_txt} titles. It describes the listing, not what people watched."
+        )
+    if kind == "association":
+        left = PLAIN.get(str(values.get("var_a")), str(values.get("var_a") or "one label"))
+        right = PLAIN.get(str(values.get("var_b")), str(values.get("var_b") or "another label"))
+        return (
+            f"{left.capitalize()} and {right} tend to show up together. "
+            f"The link scores {_num(effect, 2)} on a scale from 0 (no link) to 1 "
+            f"(they always go together). This uses {n_txt} titles. "
+            "It does not mean one causes the other."
+        )
+    if kind == "concentration":
+        dim = PLAIN.get(str(values.get("dimension")), "group")
+        share = values.get("top_share")
+        share_txt = f"{float(share):.0%}" if isinstance(share, int | float) else "most"
+        return (
+            f"The catalogue is uneven by {dim}. The five largest groups hold {share_txt} "
+            f"of the titles, and many other groups are tiny. This uses {n_txt} titles."
+        )
+    if kind == "composition_shift":
+        share_a = values.get("start_share")
+        share_b = values.get("end_share")
+        a_txt = f"{float(share_a):.1%}" if isinstance(share_a, int | float) else "—"
+        b_txt = f"{float(share_b):.1%}" if isinstance(share_b, int | float) else "—"
+        return (
+            f"The share of {values.get('segment')} {values.get('direction') or 'changed'} "
+            f"from {a_txt} to {b_txt} between {values.get('start_period')} and "
+            f"{values.get('end_period')}. That is about {_num(values.get('delta_pp'))} "
+            f"percentage points across {n_txt} titles. This is what was added, not what was watched."
+        )
+    return (
+        "This comparison passed the checks, but it does not have a plain-language sentence yet. "
+        f"It uses {n_txt} titles."
+    )
+
+
 def fail(message: str | None) -> None:
     st.error(f"The API at `{API}` did not respond. {message or ''} Start it, then refresh.")
 
@@ -189,17 +289,15 @@ def page_overview() -> None:
         year_chart(series["points"])
 
     insights, _ = api_get("/insights", "limit=5")
-    st.subheader("Strongest findings")
+    st.subheader("What stands out")
     if isinstance(insights, dict):
         st.caption(
-            f"{insights.get('n_candidates')} tested · {insights.get('n_survivors')} survived "
-            "BH-FDR and the effect-size floor."
+            f"The engine compared {insights.get('n_candidates')} patterns and kept "
+            f"{insights.get('n_survivors')}. A pattern is kept only when the gap is large "
+            "and it still looks real after many comparisons. These are not viewing figures."
         )
         for item in insights.get("items") or []:
-            st.markdown(f"**{item.get('text')}**")
-            st.caption(
-                f"{item.get('effect_name')} {item.get('effect')} · q={item.get('q')} · n={item.get('n')}"
-            )
+            st.markdown(plain_finding(item))
 
 
 def page_catalogue() -> None:
@@ -236,36 +334,28 @@ def page_catalogue() -> None:
 
 
 def page_insights() -> None:
-    st.title("Findings")
+    st.title("What the catalogue shows")
     insights, error = api_get("/insights", "limit=27")
     if error or not isinstance(insights, dict):
         fail(error)
         return
-    st.caption(
-        f"{insights.get('n_candidates')} candidates tested, {insights.get('n_survivors')} survived. "
-        "Each row has an effect size, an adjusted p-value, and n."
+    st.markdown(
+        "Each note below is a difference inside the listing. "
+        f"Out of {insights.get('n_candidates')} comparisons, "
+        f"{insights.get('n_survivors')} were large enough to keep. "
+        "None of them measure views, watch time, or revenue."
     )
     items = insights.get("items") or []
-    themes = sorted({item.get("theme") for item in items if item.get("theme")})
-    theme = st.radio("Theme", ["All", *themes], horizontal=True)
-    rows = items if theme == "All" else [item for item in items if item.get("theme") == theme]
-    table = pd.DataFrame(
-        [
-            {
-                "Finding": item.get("text"),
-                "Effect": item.get("effect"),
-                "Measure": item.get("effect_name"),
-                "q": item.get("q"),
-                "n": item.get("n"),
-            }
-            for item in rows
-        ]
-    )
-    st.dataframe(table, use_container_width=True, hide_index=True, height=360)
-    if rows:
-        pick = st.selectbox("Open one finding", [item.get("text") for item in rows])
-        chosen = next(item for item in rows if item.get("text") == pick)
-        st.json(chosen)
+    themes = [theme for theme in THEME_LABELS if any(item.get("theme") == theme for item in items)]
+    labels = ["All", *[THEME_LABELS[theme] for theme in themes]]
+    picked = st.radio("Show", labels, horizontal=True)
+    if picked == "All":
+        rows = items
+    else:
+        theme = next(key for key, label in THEME_LABELS.items() if label == picked)
+        rows = [item for item in items if item.get("theme") == theme]
+    for index, item in enumerate(rows, start=1):
+        st.markdown(f"**{index}. {plain_finding(item)}**")
 
 
 def page_analyzer() -> None:
