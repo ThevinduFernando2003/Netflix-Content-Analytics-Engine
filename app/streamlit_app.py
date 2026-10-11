@@ -113,26 +113,57 @@ def navigate() -> str:
     return choice
 
 
+def _readable_chart(chart: alt.Chart) -> alt.Chart:
+    return (
+        chart.configure(background="#ffffff")
+        .configure_view(strokeWidth=0, fill="#ffffff")
+        .configure_axis(
+            labelColor="#141414",
+            titleColor="#141414",
+            labelFontSize=13,
+            titleFontSize=15,
+            gridColor="#e6dfd6",
+            domainColor="#141414",
+            tickColor="#141414",
+        )
+        .configure_title(color="#141414", fontSize=16)
+    )
+
+
 def bar_chart(frame: pd.DataFrame, label: str) -> None:
     if frame.empty:
         st.info("Nothing matches that search.")
         return
+    named = frame.rename(columns={"key": "name"})
     chart = (
-        alt.Chart(frame)
+        alt.Chart(named)
         .mark_bar(color="#b11226", cornerRadiusEnd=4)
         .encode(
-            x=alt.X("n:Q", title="Titles"),
-            y=alt.Y("key:N", sort="-x", title=None),
+            x=alt.X("n:Q", title="Number of titles"),
+            y=alt.Y("name:N", sort="-x", title=label),
             tooltip=[
-                alt.Tooltip("key:N", title=label),
-                alt.Tooltip("n:Q", title="Titles", format=","),
+                alt.Tooltip("name:N", title=label),
+                alt.Tooltip("n:Q", title="Number of titles", format=","),
             ],
         )
-        .properties(height=max(240, 28 * len(frame)))
-        .configure_view(strokeWidth=0)
-        .configure_axis(gridColor="#f0e7dc", labelColor="#3b2a2a", titleColor="#6d5c5c")
+        .properties(height=max(240, 32 * len(named)), background="#ffffff")
     )
-    st.altair_chart(chart, use_container_width=True)
+    st.altair_chart(_readable_chart(chart), use_container_width=True)
+
+
+def year_chart(points: list[dict]) -> None:
+    frame = pd.DataFrame(points).rename(columns={"t": "Year", "v": "Titles added"})
+    chart = (
+        alt.Chart(frame)
+        .mark_line(color="#b11226", point=alt.OverlayMarkDef(color="#141414", size=50))
+        .encode(
+            x=alt.X("Year:O", title="Year added to Netflix"),
+            y=alt.Y("Titles added:Q", title="Titles added that year"),
+            tooltip=["Year", "Titles added"],
+        )
+        .properties(height=280, background="#ffffff")
+    )
+    st.altair_chart(_readable_chart(chart), use_container_width=True)
 
 
 def page_overview() -> None:
@@ -155,8 +186,7 @@ def page_overview() -> None:
     series, _ = api_get("/stats/timeseries", "metric=titles_added")
     if isinstance(series, dict) and series.get("points"):
         st.subheader("Titles added by year")
-        chart = pd.DataFrame(series["points"]).rename(columns={"t": "year", "v": "titles"})
-        st.line_chart(chart.set_index("year"), color="#b11226", height=260)
+        year_chart(series["points"])
 
     insights, _ = api_get("/insights", "limit=5")
     st.subheader("Strongest findings")
@@ -174,8 +204,8 @@ def page_overview() -> None:
 
 def page_catalogue() -> None:
     st.title("Catalogue bars")
-    st.caption("Composition of the listing. These counts are not audience demand.")
-    choice = st.radio("Break down by", list(SEGMENT_FIELDS), horizontal=True, label_visibility="collapsed")
+    st.caption("Each bar is a group of titles in the listing. Taller is not more popular.")
+    choice = st.radio("Show bars for", list(SEGMENT_FIELDS), horizontal=True)
     how_many = st.radio("How many bars", ["Top 8", "Top 15", "All"], horizontal=True, index=0)
     query = st.text_input("Jump to a name", placeholder="Type a country or genre")
     payload, error = api_get("/stats/segments", f"by={SEGMENT_FIELDS[choice]}")
