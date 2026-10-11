@@ -7,15 +7,15 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       ENRICHMENT_ENABLED: "false"
       INSIGHT_LLM_POLISH: "false"
       NETFLIX_FAST: "1"
       PYTHONPATH: .
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
@@ -34,7 +34,7 @@ jobs:
       - name: Docker build (runtime, no training, no network calls)
         run: docker build -t ncae:ci .
       - name: Upload coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: coverage
